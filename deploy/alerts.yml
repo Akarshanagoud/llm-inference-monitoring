@@ -1,0 +1,75 @@
+# Alerts are written on burn rate rather than raw thresholds. A single slow
+# request should never page anyone; a trajectory that exhausts the error budget
+# should.
+groups:
+  - name: llm-gateway-slo
+    interval: 30s
+    rules:
+      - record: llm:request_error_rate:ratio_rate1h
+        expr: |
+          sum(rate(llm_request_errors_total[1h]))
+            / clamp_min(sum(rate(llm_requests_total[1h])), 0.001)
+
+      - record: llm:request_error_rate:ratio_rate6h
+        expr: |
+          sum(rate(llm_request_errors_total[6h]))
+            / clamp_min(sum(rate(llm_requests_total[6h])), 0.001)
+
+      # 99.5% availability objective => 0.005 error budget.
+      # Burn rate 14.4 exhausts 2% of a 30-day budget in one hour.
+      - alert: LLMErrorBudgetBurningFast
+        expr: llm:request_error_rate:ratio_rate1h > (14.4 * 0.005)
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "Error budget burning at >14x"
+          description: "1h error rate {{ $value | humanizePercentage }} against a 0.5% budget."
+
+      - alert: LLMErrorBudgetBurningSlow
+        expr: llm:request_error_rate:ratio_rate6h > (6 * 0.005)
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Error budget burning at >6x over 6 hours"
+
+      - alert: LLMTimeToFirstTokenDegraded
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(llm_time_to_first_token_seconds_bucket[10m])) by (le, model)) > 1
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: "p95 TTFT above 1s for {{ $labels.model }}"
+          description: "Users feel TTFT directly; total latency can look fine while this regresses."
+
+      - alert: LLMQueueBacklog
+        expr: llm_queue_depth > 50
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Inference queue backing up"
+          description: "Queue depth {{ $value }}. Requests are waiting for batch slots."
+
+      - alert: LLMKVCacheSaturated
+        expr: llm_kv_cache_utilization_ratio > 0.95
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "KV cache above 95%"
+          description: "Preemption and recompute are likely; consider more replicas."
+
+      - alert: LLMBackendDown
+        expr: llm_backend_up == 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "Model backend unreachable from the gateway"
+
+      - alert: LLMRetryStorm
+        expr: |
+          sum(rate(llm_retries_total[5m])) / clamp_min(sum(rate(llm_requests_total[5m])), 0.001) > 0.2
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "More than 20% of requests are being retried"
+          description: "Retries hide errors in the availability metric while tripling load."

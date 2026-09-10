@@ -1,0 +1,58 @@
+# The model server the gateway fronts. Included so the reference deployment is
+# complete; the gateway itself needs no GPU.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  labels: { app: vllm }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: vllm }
+  template:
+    metadata:
+      labels: { app: vllm }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          args:
+            - --model=meta-llama/Llama-3.1-8B-Instruct
+            - --max-model-len=8192
+            - --gpu-memory-utilization=0.90
+            - --enable-prefix-caching       # the cache the gateway reports on
+          ports:
+            - { name: http, containerPort: 8000 }
+          resources:
+            limits: { nvidia.com/gpu: 1, memory: "32Gi" }
+            requests: { cpu: "4", memory: "24Gi" }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 120   # weights take a while to load
+            periodSeconds: 10
+            failureThreshold: 30
+          volumeMounts:
+            - { name: model-cache, mountPath: /root/.cache/huggingface }
+            # vLLM needs a large /dev/shm for tensor-parallel communication.
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: model-cache
+          emptyDir: { sizeLimit: 60Gi }
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 8Gi }
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+spec:
+  selector: { app: vllm }
+  ports:
+    - { name: http, port: 8000, targetPort: http }

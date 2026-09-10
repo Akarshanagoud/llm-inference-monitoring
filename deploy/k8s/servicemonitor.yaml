@@ -1,0 +1,31 @@
+# For clusters running the Prometheus Operator.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: llm-gateway
+  labels: { release: kube-prometheus-stack }
+spec:
+  selector:
+    matchLabels: { app: llm-gateway }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: llm-gateway-slo
+  labels: { release: kube-prometheus-stack }
+spec:
+  groups:
+    - name: llm-gateway-slo
+      rules:
+        - alert: LLMErrorBudgetBurningFast
+          expr: |
+            sum(rate(llm_request_errors_total[1h]))
+              / clamp_min(sum(rate(llm_requests_total[1h])), 0.001) > 0.072
+          for: 2m
+          labels: { severity: page }
+          annotations:
+            summary: "LLM gateway error budget burning at >14x"

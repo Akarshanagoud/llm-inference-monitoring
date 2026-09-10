@@ -1,0 +1,47 @@
+# Full local stack: gateway + Prometheus + Grafana, no GPU required.
+#   docker compose up
+#   open http://localhost:3000  (Grafana, anonymous viewer)
+services:
+  gateway:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      LLMOBS_BACKEND: local         # switch to vllm/triton and set LLMOBS_BASE_URL
+      LLMOBS_SIM_SPEED: "20"
+      LLMOBS_SIM_FAILURE_RATE: "0.02"
+      LLMOBS_DB: /data/traces.db
+      LLMOBS_MAX_IN_FLIGHT: "64"
+    volumes:
+      - trace-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health',timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/alerts.yml:/etc/prometheus/alerts.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports: ["3000:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./deploy/grafana:/etc/grafana/provisioning:ro
+    depends_on: [prometheus]
+
+volumes:
+  trace-data:

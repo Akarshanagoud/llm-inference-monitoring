@@ -18,6 +18,7 @@ WORKDIR /app
 COPY --from=builder /build/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl "llmobs[server]" && rm /tmp/*.whl
 
+RUN mkdir -p /data && chown llmobs:llmobs /data
 USER llmobs
 ENV LLMOBS_BACKEND=local \
     LLMOBS_DB=/data/traces.db \

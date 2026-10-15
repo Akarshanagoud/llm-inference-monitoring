@@ -36,7 +36,10 @@ jobs:
       - run: pip install -e ".[server]"
       - run: llmobs load -n 200 -c 16 --speed 200 --failure-rate 0.02 --db ci.db
       - run: llmobs stages --db ci.db
-      - run: llmobs slo --db ci.db --json
+      - name: SLO report is produced (exit 1 = objective breached, expected under injected failures)
+        run: |
+          llmobs slo --db ci.db --json > slo.json || [ $? -eq 1 ]
+          python -c "import json; d = json.load(open('slo.json')); assert d['replayed_traces'] > 0 and d['slos']"
       - name: Prometheus output must be valid exposition format
         run: |
           llmobs metrics -n 20 -c 4 --speed 500 --db ci.db > metrics.txt

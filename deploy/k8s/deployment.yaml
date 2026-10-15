@@ -28,7 +28,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: gateway
-          image: ghcr.io/akarshanamachanpally/llm-inference-gateway:0.1.0
+          image: ghcr.io/akarshanagoud/llm-inference-gateway:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8080 }

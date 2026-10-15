@@ -36,8 +36,8 @@ dev = [
 llmobs = "llmobs.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/akarshanamachanpally/llm-inference-monitoring"
-Issues = "https://github.com/akarshanamachanpally/llm-inference-monitoring/issues"
+Homepage = "https://github.com/Akarshanagoud/llm-inference-monitoring"
+Issues = "https://github.com/Akarshanagoud/llm-inference-monitoring/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

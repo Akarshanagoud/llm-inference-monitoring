@@ -3,10 +3,12 @@
 An LLMOps reference platform: prompt tracing, response validation, latency
 monitoring and model-serving observability for vLLM, Triton and TensorRT-LLM.
 
-[![CI](https://github.com/akarshanamachanpally/llm-inference-monitoring/actions/workflows/ci.yml/badge.svg)](https://github.com/akarshanamachanpally/llm-inference-monitoring/actions/workflows/ci.yml)
+[![CI](https://github.com/Akarshanagoud/llm-inference-monitoring/actions/workflows/ci.yml/badge.svg)](https://github.com/Akarshanagoud/llm-inference-monitoring/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Dependencies](https://img.shields.io/badge/core%20dependencies-none-brightgreen)
+
+**Docs:** [Architecture and use cases](docs/ARCHITECTURE.md) · [Verified results](docs/RESULTS.md)
 
 **The whole stack runs on a laptop with no GPU.** A built-in simulator models
 prefill/decode latency, prefix caching, queueing and failures, so the tracing,

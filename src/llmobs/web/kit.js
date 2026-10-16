@@ -86,7 +86,8 @@
   function initTheme(button) {
     let theme = store.get("kit.theme", "system");
     applyTheme(theme);
-    if (!button) return;
+    if (!button || button.dataset.kitTheme) return;
+    button.dataset.kitTheme = "1";
     const label = () => {
       button.textContent = THEME_ICON[theme];
       button.setAttribute("aria-label", "Theme: " + theme + ". Click to change.");
@@ -822,6 +823,7 @@
           .filter((r) => r.v !== null && r.v !== undefined && Number.isFinite(r.v))
           .map((r) => ({ label: r.sr.name, value: (r.sr.format || yFormat)(r.v), color: r.sr.color || seriesColor(r.si) }));
         if (opts.band && opts.band.lo[i] !== null && opts.band.lo[i] !== undefined) rows.push({ label: opts.band.label || "Range", value: yFormat(opts.band.lo[i]) + " – " + yFormat(opts.band.hi[i]) });
+        if (opts.extraRows) rows.push(...opts.extraRows(i));
         tip.show(cx, cy, ttContent(opts.tooltipTitle ? opts.tooltipTitle(labels[i], i) : xFormat(labels[i], i), rows));
       };
       overlay.addEventListener("pointermove", (e) => {
@@ -936,6 +938,9 @@
       if (lastPath !== route.path) window.scrollTo(0, 0);
       lastPath = route.path;
       const view = h("div", null);
+      // Views compose optional sections with `cond ? node : null`; skip those instead of
+      // letting the DOM's append() print the word "null".
+      view.append = (...nodes) => append(view, nodes);
       try {
         await route.render(view, params, () => mine === token);
         if (mine === token) {
@@ -987,7 +992,7 @@
     h, s, clear, append, store, api, fmt,
     card, stat, badge, banner, meter, empty, field, select, seg, kv, highlight, toast, download, busy, withButton, errorState,
     table, tip, ttContent, attachTip,
-    niceTicks, legend, hbars, columns, line, sparkline, chartCard, seriesColor, cssVar,
-    createApp, pageHead, parseHash,
+    niceTicks, measure, legend, hbars, columns, line, sparkline, chartCard, seriesColor, cssVar,
+    createApp, pageHead, parseHash, initTheme,
   };
 })();

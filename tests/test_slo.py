@@ -133,3 +133,25 @@ def test_status_serialises():
     payload = tracker.status("availability").to_dict()
     assert payload["slo"] == "availability"
     assert "burn_rates" in payload
+
+
+def test_ttft_objective_is_judged_on_first_token_not_total_duration():
+    slo = SLO(name="ttft", objective=0.95, kind="latency", latency_threshold_seconds=1.0, indicator="ttft")
+    tracker = SLOTracker([slo])
+    tracker.record(ok=True, latency_seconds=4.0, ttft_seconds=0.2)  # slow answer, fast start
+    tracker.record(ok=True, latency_seconds=1.2, ttft_seconds=1.1)  # slow start
+    status = tracker.status("ttft")
+    assert (status.total_events, status.bad_events) == (2, 1)
+
+
+def test_ttft_objective_falls_back_to_duration_without_a_first_token_time():
+    slo = SLO(name="ttft", objective=0.95, kind="latency", latency_threshold_seconds=1.0, indicator="ttft")
+    tracker = SLOTracker([slo])
+    tracker.record(ok=True, latency_seconds=0.5)
+    tracker.record(ok=True, latency_seconds=1.5)
+    assert tracker.status("ttft").bad_events == 1
+
+
+def test_default_ttft_slo_measures_time_to_first_token():
+    ttft = next(s for s in default_slos() if s.name == "ttft_p95_1s")
+    assert ttft.indicator == "ttft"

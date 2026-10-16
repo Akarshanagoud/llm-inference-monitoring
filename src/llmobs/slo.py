@@ -57,12 +57,19 @@ class SLO:
     kind: str = "availability"
     #: For latency SLOs: the threshold a request must beat to count as good.
     latency_threshold_seconds: float | None = None
+    #: For latency SLOs: what is measured against the threshold. "duration" is
+    #: the whole request; "ttft" is time to first token.
+    indicator: str = "duration"
     window_seconds: float = 30 * 86_400
     burn_windows: tuple[BurnRateWindow, ...] = DEFAULT_BURN_WINDOWS
 
-    def is_good(self, *, ok: bool, latency_seconds: float) -> bool:
+    def is_good(self, *, ok: bool, latency_seconds: float, ttft_seconds: float | None = None) -> bool:
         if self.kind == "latency":
-            return ok and latency_seconds <= (self.latency_threshold_seconds or float("inf"))
+            value = latency_seconds
+            if self.indicator == "ttft" and ttft_seconds is not None:
+                # Without a first-token time, total duration is the safe upper bound.
+                value = ttft_seconds
+            return ok and value <= (self.latency_threshold_seconds or float("inf"))
         return ok
 
     @property
@@ -119,11 +126,19 @@ class SLOTracker:
         self.slos.append(slo)
         self._events.setdefault(slo.name, deque())
 
-    def record(self, *, ok: bool, latency_seconds: float, timestamp: float | None = None) -> None:
+    def record(
+        self,
+        *,
+        ok: bool,
+        latency_seconds: float,
+        ttft_seconds: float | None = None,
+        timestamp: float | None = None,
+    ) -> None:
         now = timestamp if timestamp is not None else time.time()
         for slo in self.slos:
             events = self._events[slo.name]
-            events.append(_Event(now, slo.is_good(ok=ok, latency_seconds=latency_seconds)))
+            good = slo.is_good(ok=ok, latency_seconds=latency_seconds, ttft_seconds=ttft_seconds)
+            events.append(_Event(now, good))
             self._trim(slo, now)
 
     def _trim(self, slo: SLO, now: float) -> None:
@@ -216,5 +231,6 @@ def default_slos() -> list[SLO]:
             objective=0.95,
             kind="latency",
             latency_threshold_seconds=1.0,
+            indicator="ttft",
         ),
     ]

@@ -132,11 +132,14 @@ def generate_load(
     max_tokens: int = 96,
     prefix_reuse: float = 0.8,
     seed: int = 7,
+    stream: bool = False,
 ) -> LoadResult:
     """Drive ``requests`` prompts through the gateway at ``concurrency``.
 
     ``prefix_reuse`` controls how often a request reuses one of the shared
     system prefixes, which is what makes the prefix-cache metrics meaningful.
+    ``stream`` sends streamed requests, so time to first token is measured at
+    the first chunk instead of when the whole reply arrives.
     """
     rng = random.Random(seed)
     prompts = []
@@ -156,7 +159,7 @@ def generate_load(
 
     def run(prompt: str) -> None:
         try:
-            outcome = gateway.generate(prompt, max_tokens=max_tokens)
+            outcome = gateway.generate(prompt, max_tokens=max_tokens, stream=stream)
         except OverloadedError:
             with lock:
                 result.shed += 1

@@ -68,6 +68,32 @@ counts them as their own stage.
 
 ## Quickstart
 
+### Operations console
+
+```bash
+pip install -e ".[server]"
+llmobs ui                      # opens http://127.0.0.1:8767/ui/
+```
+
+![Operations console during a degraded-backend incident: time to first token pages, latency and availability file tickets](docs/images/console-overview.png)
+
+`llmobs ui` starts the gateway on the real-time simulator with steady streamed traffic,
+so the console is live from the first second:
+
+- **Overview**: throughput, failed requests (separately from requests a retry
+  recovered), latency and time to first token, each SLO with its error budget and
+  multi-window burn rates, and where request time goes.
+- **Backend scenarios**: switch the simulator to *flaky* (25% of calls fail) or
+  *degraded* (slow prefill and decode) and watch the burn-rate alerts fire.
+- **Traces**: every request as a span waterfall, filterable to failed, retried,
+  invalid or slowest.
+- **Load test** and **Playground**: drive a burst of concurrent requests, or send one.
+
+![A request that failed once and was answered by its retry](docs/images/console-trace.png)
+
+The console is also served by `llmobs serve` at `/ui`, in front of a real backend
+(scenarios are disabled there, since they only apply to the simulator).
+
 ### Drive load and read the report
 
 ```bash
@@ -247,11 +273,13 @@ src/llmobs/
   store.py         SQLite trace store and on-call queries
   gateway.py       The instrumented request path
   loadgen.py       Concurrent traffic generator
-  cli.py           load / trace / traces / stages / slo / health / metrics
+  cli.py           load / trace / traces / stages / slo / health / metrics / ui
   server.py        FastAPI service
+  console.py       Operations console API: live traffic, scenarios, SLOs, traces
+  web/             Console front end: static HTML, CSS and JS, no build step
   backends/        base, local simulator, vLLM, Triton, OpenAI-compatible
 deploy/            Prometheus config + alerts, Grafana dashboard, k8s manifests
-tests/             134 tests
+tests/             147 tests
 ```
 
 ## Testing

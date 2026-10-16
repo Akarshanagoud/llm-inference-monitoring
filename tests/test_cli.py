@@ -100,3 +100,18 @@ def test_version(capsys):
 def test_no_command_prints_help(capsys):
     assert main([]) == 2
     assert "usage" in capsys.readouterr().out.lower()
+
+
+def test_slo_replay_counts_requests_recovered_by_a_retry_as_served(tmp_path, capsys):
+    db = str(tmp_path / "flaky.db")
+    main(["load", "-n", "40", "-c", "4", "--speed", "1000", "--failure-rate", "0.3", "--db", db])
+    capsys.readouterr()
+    main(["slo", "--db", db, "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    availability = next(s for s in payload["slos"] if s["slo"] == "availability")
+    from llmobs import TraceStore
+
+    store = TraceStore(db)
+    rows = store.outcomes()
+    assert availability["bad_events"] == sum(r["outcome"] != "ok" for r in rows)
+    assert availability["bad_events"] < sum(r["status"] != "ok" for r in rows)

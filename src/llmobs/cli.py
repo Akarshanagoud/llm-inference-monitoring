@@ -7,6 +7,7 @@
     llmobs stages                      # where request time is actually spent
     llmobs slo                         # objectives, burn rates, budget left
     llmobs health                      # probe the backend
+    llmobs ui                          # operations console on a simulated backend
 """
 from __future__ import annotations
 
@@ -50,6 +51,7 @@ def cmd_load(args: argparse.Namespace) -> int:
             concurrency=args.concurrency,
             max_tokens=args.max_tokens,
             prefix_reuse=args.prefix_reuse,
+            stream=args.stream,
         )
         if args.json:
             print(json.dumps(
@@ -88,6 +90,32 @@ def cmd_serve(args: argparse.Namespace) -> int:
     os.environ.setdefault("LLMOBS_BASE_URL", args.base_url)
     os.environ.setdefault("LLMOBS_MODEL", args.model)
     uvicorn.run("llmobs.server:app", host=args.host, port=args.port, log_level="info")
+    return EXIT_OK
+
+
+def cmd_ui(args: argparse.Namespace) -> int:
+    try:
+        import uvicorn
+    except ImportError:
+        print("error: the server extra is required: pip install 'llmobs[server]'", file=sys.stderr)
+        return EXIT_USAGE
+
+    import os
+    import tempfile
+    import threading
+    import webbrowser
+
+    db = args.db or os.path.join(tempfile.mkdtemp(prefix="llmobs-"), "traces.db")
+    os.environ["LLMOBS_BACKEND"] = "local"
+    os.environ["LLMOBS_SIM_SPEED"] = str(args.speed)
+    os.environ["LLMOBS_DB"] = db
+    os.environ["LLMOBS_DEMO_TRAFFIC"] = str(max(args.rps, 0))
+    url = f"http://{args.host}:{args.port}/ui/"
+    print(f"Inference Observatory: {url}  (Ctrl+C to stop)")
+    print(f"traces: {db}")
+    if not args.no_browser:
+        threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+    uvicorn.run("llmobs.server:app", host=args.host, port=args.port, log_level="warning")
     return EXIT_OK
 
 
@@ -189,10 +217,16 @@ def cmd_slo(args: argparse.Namespace) -> int:
         # than an empty in-process window.
         replayed = 0
         for payload in store.iter_traces():
+            root = next((s for s in payload["spans"] if s.get("parent_id") is None), {})
+            ttft_ms = root.get("ttft_ms")
             gateway.slo.record(
-                ok=payload["status"] == "ok",
+                # The root span's status is the request's outcome. The trace is
+                # marked "error" when any attempt failed, including attempts a
+                # retry recovered, which the caller never saw.
+                ok=root.get("status", payload["status"]) == "ok",
                 latency_seconds=(payload["duration_ms"] or 0) / 1000,
-                timestamp=payload["spans"][0]["started_at"] if payload["spans"] else None,
+                ttft_seconds=ttft_ms / 1000 if ttft_ms is not None else None,
+                timestamp=root.get("started_at"),
             )
             replayed += 1
 
@@ -263,6 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
     load.add_argument("-c", "--concurrency", type=int, default=8)
     load.add_argument("--max-tokens", type=int, default=96)
     load.add_argument("--prefix-reuse", type=float, default=0.8)
+    load.add_argument("--stream", action="store_true", help="send streamed requests")
     load.add_argument("--json", action="store_true")
     load.set_defaults(func=cmd_load)
 
@@ -271,6 +306,15 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8080)
     serve.set_defaults(func=cmd_serve)
+
+    ui = sub.add_parser("ui", help="open the operations console on a simulated backend")
+    ui.add_argument("--host", default="127.0.0.1")
+    ui.add_argument("--port", type=int, default=8767)
+    ui.add_argument("--speed", type=float, default=1.0, help="simulator speed; 1.0 is real time")
+    ui.add_argument("--rps", type=float, default=3.0, help="background traffic; 0 disables it")
+    ui.add_argument("--db", help="trace store path (default: a temporary file)")
+    ui.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
+    ui.set_defaults(func=cmd_ui)
 
     trace = sub.add_parser("trace", help="print one trace")
     trace.add_argument("trace_id")

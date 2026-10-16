@@ -112,30 +112,35 @@ class LocalSimBackend(Backend):
         words = [rng.choice(_LOREM) for _ in range(word_count)]
         return " ".join(words)
 
+    # -- batch slots and failures, shared by generate and stream ---------------
+    def _admit(self) -> None:
+        """Take a batch slot, waiting in the queue when the server is saturated."""
+        with self._lock:
+            queued = self._in_flight >= self.max_concurrency
+            if queued:
+                self._queue_depth += 1
+            self._in_flight += 1
+        if queued:
+            # Waiting for a batch slot: the dominant latency term once a
+            # server is saturated, and the one teams forget to measure.
+            self._sleep(self._jittered(self.decode_ms_per_token * 8))
+            with self._lock:
+                self._queue_depth = max(0, self._queue_depth - 1)
+        if self.failure_rate and self._rng.random() < self.failure_rate:
+            self._sleep(self.base_overhead_ms)
+            raise BackendError("simulated backend failure", retryable=True)
+
+    def _release(self) -> None:
+        with self._lock:
+            self._in_flight = max(0, self._in_flight - 1)
+
     # -- Backend interface --------------------------------------------------
     def generate(self, request: GenerationRequest) -> GenerationResponse:
         if self._closed:
             raise BackendError("backend is closed", retryable=False)
 
-        with self._lock:
-            if self._in_flight >= self.max_concurrency:
-                self._queue_depth += 1
-                queued = True
-            else:
-                queued = False
-            self._in_flight += 1
-
         try:
-            if queued:
-                # Waiting for a batch slot: the dominant latency term once a
-                # server is saturated, and the one teams forget to measure.
-                self._sleep(self._jittered(self.decode_ms_per_token * 8))
-                with self._lock:
-                    self._queue_depth = max(0, self._queue_depth - 1)
-
-            if self.failure_rate and self._rng.random() < self.failure_rate:
-                self._sleep(self.base_overhead_ms)
-                raise BackendError("simulated backend failure", retryable=True)
+            self._admit()
 
             prompt_tokens = estimate_tokens(request.prompt)
             cached = min(self._cached_tokens(request.prompt), prompt_tokens)
@@ -157,26 +162,29 @@ class LocalSimBackend(Backend):
                 completion_tokens=completion_tokens,
                 cached_prompt_tokens=cached,
                 finish_reason="stop",
-                raw={"simulated": True, "queued": queued},
+                raw={"simulated": True},
             )
         finally:
-            with self._lock:
-                self._in_flight = max(0, self._in_flight - 1)
+            self._release()
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
         if self._closed:
             raise BackendError("backend is closed", retryable=False)
 
-        prompt_tokens = estimate_tokens(request.prompt)
-        cached = min(self._cached_tokens(request.prompt), prompt_tokens)
-        self._sleep(
-            self._jittered(
-                self.base_overhead_ms + max(prompt_tokens - cached, 1) * self.prefill_ms_per_1k / 1000
+        try:
+            self._admit()
+            prompt_tokens = estimate_tokens(request.prompt)
+            cached = min(self._cached_tokens(request.prompt), prompt_tokens)
+            self._sleep(
+                self._jittered(
+                    self.base_overhead_ms + max(prompt_tokens - cached, 1) * self.prefill_ms_per_1k / 1000
+                )
             )
-        )
-        for word in self._completion_for(request).split():
-            self._sleep(self._jittered(self.decode_ms_per_token))
-            yield word + " "
+            for word in self._completion_for(request).split():
+                self._sleep(self._jittered(self.decode_ms_per_token))
+                yield word + " "
+        finally:
+            self._release()
 
     def health(self) -> BackendHealth:
         with self._lock:

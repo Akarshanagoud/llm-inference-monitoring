@@ -13,6 +13,9 @@ Environment:
     LLMOBS_MODEL      model name to request
     LLMOBS_DB         SQLite trace store path
     LLMOBS_MAX_IN_FLIGHT  shed load above this concurrency (0 disables)
+    LLMOBS_DEMO_TRAFFIC   start simulated background traffic at this many req/s
+
+The operations console is served from the same app at ``/ui``.
 """
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ except ImportError as exc:  # pragma: no cover
 
 from . import __version__
 from .backends import BackendError, build_backend
+from .console import mount_console
 from .gateway import GatewayConfig, InferenceGateway, OverloadedError
 
 
@@ -120,6 +124,7 @@ def generate(request: GenerateRequest) -> dict[str, Any]:
             model=request.model,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
+            stream=request.stream,
             validation_context=validation_context,
         )
     except OverloadedError as exc:
@@ -178,3 +183,10 @@ def stage_latency() -> list[dict[str, Any]]:
 def slo_status() -> dict[str, Any]:
     statuses = [s.to_dict() for s in gateway.slo.all_status()]
     return {"worst_severity": gateway.slo.worst_severity().value, "slos": statuses}
+
+
+# The operations console (``/ui``) reads this gateway's trace store and SLO tracker.
+traffic = mount_console(app, gateway)
+_demo_rps = float(os.getenv("LLMOBS_DEMO_TRAFFIC", "0") or 0)
+if _demo_rps > 0:
+    traffic.start(_demo_rps)

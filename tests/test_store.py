@@ -104,3 +104,34 @@ def test_iter_traces_pages_through_everything(tmp_path):
 def test_missing_trace_returns_none(tmp_path):
     store = TraceStore(tmp_path / "t.db")
     assert store.get("does-not-exist") is None
+
+
+def test_outcomes_separate_retried_successes_from_failures(tmp_path):
+    import contextlib
+
+    from llmobs import BackendError, GatewayConfig, InferenceGateway, LocalSimBackend
+
+    gateway = InferenceGateway(
+        LocalSimBackend(speed=1000, failure_rate=0.5, seed=1337),
+        GatewayConfig(trace_store_path=str(tmp_path / "t.db"), retry_base_delay=0.0),
+    )
+    for i in range(30):
+        with contextlib.suppress(BackendError):
+            gateway.generate(f"prompt {i}", max_tokens=16)
+    rows = gateway.store.outcomes()
+    assert len(rows) == 30
+    assert [r["started_at"] for r in rows] == sorted(r["started_at"] for r in rows)
+    retried = [r for r in rows if r["status"] == "error" and r["outcome"] == "ok"]
+    failed = [r for r in rows if r["outcome"] == "error"]
+    assert retried, "a retried success should be visible as such"
+    assert all(r["ttft_ms"] is not None for r in retried), "the retry's first token is the request's"
+    assert all(r["status"] == "error" for r in failed)
+    gateway.close()
+
+
+def test_breakdown_shares_add_up_to_the_whole_request(tmp_path):
+    store = TraceStore(tmp_path / "t.db")
+    _write_traces(store, 4)
+    stages = store.breakdown()
+    assert {s["kind"] for s in stages} >= {"request", "inference"}
+    assert abs(sum(s["share"] for s in stages) - 1.0) < 0.01

@@ -80,6 +80,9 @@ class TraceStore:
         )
         usage = trace.total_usage()
         payload = json.dumps(trace.to_dict())
+        # The root span carries the request's time to first token. The first
+        # inference span has none when that attempt failed and a retry answered.
+        ttft_ms = root.ttft_ms if root.ttft_ms is not None else inference.ttft_ms
 
         with self._lock:
             self._conn.execute(
@@ -97,7 +100,7 @@ class TraceStore:
                     len(trace.spans),
                     usage.prompt_tokens,
                     usage.completion_tokens,
-                    inference.ttft_ms,
+                    ttft_ms,
                     1 if root.attributes.get("valid", True) else 0,
                     payload,
                 ),
@@ -188,6 +191,44 @@ class TraceStore:
                 "total_ms": round(row["total_ms"], 3),
             }
             for row in rows
+        ]
+
+    def outcomes(self, since: float = 0.0, limit: int = 50_000) -> list[dict[str, Any]]:
+        """Requests started at or after ``since``, oldest first, with their outcome.
+
+        ``outcome`` is the root span's status: whether the caller got an answer.
+        ``status`` is the trace's: "error" when any attempt failed, including
+        attempts a retry recovered. Telling the two apart is the difference
+        between an outage and a flaky dependency.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT t.trace_id, t.started_at, t.duration_ms, t.status, t.ttft_ms,
+                          t.prompt_tokens, t.completion_tokens, t.valid, s.status AS outcome
+                   FROM traces t
+                   JOIN spans s ON s.trace_id = t.trace_id AND s.parent_id IS NULL
+                   WHERE t.started_at >= ?
+                   ORDER BY t.started_at ASC LIMIT ?""",
+                (since, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def breakdown(self, since: float = 0.0) -> list[dict[str, Any]]:
+        """Mean exclusive time per stage, so the shares add up to the request."""
+        totals: dict[str, float] = {}
+        count = 0
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM traces WHERE started_at >= ?", (since,)
+            ).fetchall()
+        for row in rows:
+            count += 1
+            for kind, ms in json.loads(row["payload"]).get("breakdown_ms", {}).items():
+                totals[kind] = totals.get(kind, 0.0) + (ms or 0.0)
+        grand = sum(totals.values()) or 1.0
+        return [
+            {"kind": kind, "mean_ms": round(total / count, 3), "share": round(total / grand, 4)}
+            for kind, total in sorted(totals.items(), key=lambda item: -item[1])
         ]
 
     def summary(self) -> dict[str, Any]:

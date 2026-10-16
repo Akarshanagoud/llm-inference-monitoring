@@ -203,7 +203,11 @@ class InferenceGateway:
                 )
 
                 self.metrics.observe_span(root)
-                self.slo.record(ok=True, latency_seconds=duration_ms / 1000)
+                self.slo.record(
+                    ok=True,
+                    latency_seconds=duration_ms / 1000,
+                    ttft_seconds=ttft_ms / 1000 if ttft_ms is not None else None,
+                )
                 self._notify(result)
                 return result
 
@@ -301,7 +305,11 @@ class InferenceGateway:
             root.usage.completion_tokens = max(1, len(text) // 4)
             root.finish()
             self.metrics.observe_span(root)
-            self.slo.record(ok=True, latency_seconds=(root.duration_ms or 0) / 1000)
+            self.slo.record(
+                ok=True,
+                latency_seconds=(root.duration_ms or 0) / 1000,
+                ttft_seconds=root.ttft_ms / 1000 if root.ttft_ms is not None else None,
+            )
 
     # -- observability surface ---------------------------------------------
     def refresh_backend_health(self) -> dict[str, Any]:
